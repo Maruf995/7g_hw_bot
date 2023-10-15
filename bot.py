@@ -3,6 +3,7 @@ from aiogram.utils import executor
 from aiogram import types
 from PIL import Image, ImageDraw, ImageFont
 import io
+import textwrap
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.dispatcher import FSMContext
 from aiogram.utils.callback_data import CallbackData
@@ -27,8 +28,11 @@ cursor.execute("SELECT subject, task FROM homework")
 rows = cursor.fetchall()
 
 subject_cb = CallbackData("subject", "subject_id")
+delete_subject_cb = CallbackData("delete_subject", "subject_id")
 
-admin_user_ids = [1684336348, 1121073609, 2118892896, 5089971653]
+
+admin_user_ids = [1684336348, 2118892896, 5089971653]
+maruf_id = [1684336348]
 
 subjects = {
     "Русский": "Русский",
@@ -51,7 +55,6 @@ subjects = {
     'Информатика (2 группа)': 'Информатика (2 группа)',
     'ИЗО': 'ИЗО'
 }
-
 
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
@@ -78,7 +81,7 @@ async def list_homework_command(message: types.Message):
         rows = cursor.fetchall()
 
         # Открываем фоновое изображение
-        background_image = Image.open("back.jpg")
+        background_image = Image.open("back.jpg").convert('RGBA')
         draw = ImageDraw.Draw(background_image)
         font_path = "font.ttf"
         font_size = 20
@@ -88,30 +91,42 @@ async def list_homework_command(message: types.Message):
         # Получаем размеры изображения
         image_width, image_height = background_image.size
 
-        # Добавляем данные на изображение
-        y_offset = 102
+        # Максимальное количество строк текста на одной картинке
+        max_lines_per_image = 12
+
+        # Разбиваем текст на подстроки
+        text_lines = []
         for row in rows:
             subject, task = row
-            text = f'{subject}: {task}'
+            wrapped_text = textwrap.fill(f'{subject}: {task}', width=39)  # Максимальная длина строки 40 символов
+            text_lines.extend(wrapped_text.split('\n'))
 
-            # Получаем размеры текста
-            # Вычисляем координаты для центрирования текста
-            x = (image_width - image_height) // 3
-            y = y_offset
+        # Разделяем текст на несколько изображений
+        for i in range(0, len(text_lines), max_lines_per_image):
+            start_index = i
+            end_index = i + max_lines_per_image
+            lines_to_display = text_lines[start_index:end_index]
 
-            # Рисуем текст на изображении
-            draw.text((x, y), text, fill=text_color, font=font)
-            y_offset += font_size + 4.6  # Учитываем высоту текста и добавляем отступ
+            # Создаем изображение с текстом
+            text_image = Image.new('RGBA', background_image.size, (255, 255, 255, 0))
+            text_draw = ImageDraw.Draw(text_image)
+            y_offset = 102
+            for line in lines_to_display:
+                text_width, text_height =  text_draw.textsize(line, font=font)
+                text_draw.text((50, y_offset), line, fill=text_color, font=font)
+                y_offset += text_height + 4  # Используем textsize для получения высоты текста и добавляем отступ
 
-        # Сохраняем изображение и отправляем его пользователю
-        image_bytes = io.BytesIO()
-        background_image.save(image_bytes, format='PNG')
-        image_bytes.seek(0)
-        await bot.send_photo(message.chat.id, photo=image_bytes)
+            # Объединяем фоновое изображение и изображение с текстом
+            combined_image = Image.alpha_composite(background_image, text_image)
+
+            # Сохраняем изображение и отправляем его пользователю
+            image_bytes = io.BytesIO()
+            combined_image.save(image_bytes, format='PNG')
+            image_bytes.seek(0)
+            await bot.send_photo(message.chat.id, photo=image_bytes)
 
     except Exception as e:
         logging.error(f"Ошибка при получении списка домашних заданий: {e}")
-
 
 def get_subjects_keyboard():
     keyboard = InlineKeyboardMarkup(row_width=2)
@@ -119,6 +134,51 @@ def get_subjects_keyboard():
         button = InlineKeyboardButton(text=value, callback_data=subject_cb.new(subject_id=key))
         keyboard.add(button)
     return keyboard
+
+def get_delete_subjects_keyboard():
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    for key, value in subjects.items():
+        button = InlineKeyboardButton(text=value, callback_data=delete_subject_cb.new(subject_id=key))
+        keyboard.add(button)
+    return keyboard
+
+@dp.message_handler(commands=['delete'])
+async def delete_homework_command(message: types.Message):
+    user_id = message.from_user.id
+
+    if user_id in admin_user_ids:
+        await message.answer('Выберите предмет, который нужно удалить:', reply_markup=get_delete_subjects_keyboard())
+    else:
+        await message.answer("Вы не являетесь администратором. Извините, у вас нет доступа к этой команде.")
+
+@dp.message_handler(commands=['clear_database'])
+async def clear_database_command(message: types.Message):
+    user_id = message.from_user.id
+    if user_id in maruf_id:
+        try:
+            cursor.execute('DELETE FROM homework')
+            conn.commit()
+            await message.answer("База данных успешно очищена.")
+        except Exception as e:
+            logging.error(f"Ошибка при очистке базы данных: {e}")
+            await message.answer("Произошла ошибка при очистке базы данных.")
+    else:
+        await message.answer("Вы не являетесь администратором. Извините, у вас нет доступа к этой команде.")
+
+@dp.callback_query_handler(delete_subject_cb.filter())
+async def process_delete_subject_selection(callback_query: CallbackQuery, state: FSMContext):
+    try:
+        subject_id = callback_query.data.split(':')[-1]
+        subject_name = subjects.get(subject_id)
+        if subject_name:
+            # Удаляем урок из базы данных
+            cursor.execute('DELETE FROM homework WHERE subject = ?', (subject_id,))
+            conn.commit()
+            await callback_query.message.answer(f'Домашнее задание для предмета "{subject_name}" успешно удалено.')
+        else:
+            await callback_query.message.answer('Ошибка: предмет не найден.')
+    except Exception as e:
+        logging.error(f"Ошибка при удалении домашнего задания: {e}")
 
 @dp.message_handler(commands=['add'])
 async def add_homework_command(message: types.Message):
@@ -170,8 +230,6 @@ async def save_homework(message: types.Message, state: FSMContext):
             await message.answer("Вы не являетесь администратором. Извините, у вас нет доступа к этой команде.")
     except Exception as e:
         logging.error(f"Ошибка при обновлении/сохранении домашнего задания: {e}")
-
-
 
 if __name__ == '__main__':
     from aiogram import executor
