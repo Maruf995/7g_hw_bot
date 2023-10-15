@@ -4,7 +4,7 @@ from aiogram import types
 from PIL import Image, ImageDraw, ImageFont
 import io
 import textwrap
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from aiogram.dispatcher import FSMContext
 from aiogram.utils.callback_data import CallbackData
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -56,13 +56,30 @@ subjects = {
     'ИЗО': 'ИЗО'
 }
 
+list = InlineKeyboardButton(text="Список ДЗ", callback_data="hw")
+hw_btn = InlineKeyboardMarkup(row_width=1).add(list)
+
+def get_subjects_keyboard():
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    for key, value in subjects.items():
+        button = InlineKeyboardButton(text=value, callback_data=subject_cb.new(subject_id=key))
+        keyboard.add(button)
+    return keyboard
+
+def get_delete_subjects_keyboard():
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    for key, value in subjects.items():
+        button = InlineKeyboardButton(text=value, callback_data=delete_subject_cb.new(subject_id=key))
+        keyboard.add(button)
+    return keyboard
+
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
     await message.answer(f'Привет, {message.from_user.full_name}! ')
     await message.answer('Этот бот был создан: @maruf_proger\n'
                          'Т.К. Вы ему все надоели, Он решил создать телеграм бота.\n'
                          'Через которого можно будет в любой момент узнать Д/З.\n'
-                         'А так же, задать вопрос админам и оставить жалобу')
+                         'А так же, задать вопрос админам и оставить жалобу', reply_markup=hw_btn)
 
 @dp.message_handler(commands=['top'])
 async def top(message: types.Message):
@@ -74,8 +91,18 @@ async def top(message: types.Message):
     await message.answer('ЧАСТИЧНО ЭЛЯ')
     await message.answer('А ОМА ТУПОЙ ИШАК')
 
-@dp.message_handler(commands=['list'])
-async def list_homework_command(message: types.Message):
+@dp.message_handler(commands=['oma'])
+async def top(message: types.Message):
+    for i in range(10):
+        await message.answer('ОМА ЛОХ')
+
+@dp.message_handler(commands=['table'])
+async def top(message: types.Message):
+    with open('table.png', 'rb') as table_photo:
+        await bot.send_photo(message.chat.id, table_photo)
+
+@dp.callback_query_handler(lambda query: query.data == "hw")
+async def list_homework_command(callback_query: CallbackQuery):
     try:
         cursor.execute('SELECT subject, task FROM homework')
         rows = cursor.fetchall()
@@ -123,24 +150,12 @@ async def list_homework_command(message: types.Message):
             image_bytes = io.BytesIO()
             combined_image.save(image_bytes, format='PNG')
             image_bytes.seek(0)
-            await bot.send_photo(message.chat.id, photo=image_bytes)
+            await bot.send_photo(callback_query.message.chat.id, photo=image_bytes)
+
+        await bot.send_message(callback_query.message.chat.id, 'Получить список ДЗ еще раз', reply_markup=hw_btn)
 
     except Exception as e:
         logging.error(f"Ошибка при получении списка домашних заданий: {e}")
-
-def get_subjects_keyboard():
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    for key, value in subjects.items():
-        button = InlineKeyboardButton(text=value, callback_data=subject_cb.new(subject_id=key))
-        keyboard.add(button)
-    return keyboard
-
-def get_delete_subjects_keyboard():
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    for key, value in subjects.items():
-        button = InlineKeyboardButton(text=value, callback_data=delete_subject_cb.new(subject_id=key))
-        keyboard.add(button)
-    return keyboard
 
 @dp.message_handler(commands=['delete'])
 async def delete_homework_command(message: types.Message):
@@ -180,7 +195,7 @@ async def process_delete_subject_selection(callback_query: CallbackQuery, state:
     except Exception as e:
         logging.error(f"Ошибка при удалении домашнего задания: {e}")
 
-@dp.message_handler(commands=['add'])
+@dp.message_handler(commands=['add'], )
 async def add_homework_command(message: types.Message):
     user_id = message.from_user.id
     
@@ -203,7 +218,6 @@ async def process_subject_selection(callback_query: CallbackQuery, state: FSMCon
             await callback_query.message.answer('Ошибка: предмет не найден.')
     except Exception as e:
         logging.error(f"Ошибка при обработке запроса обратного вызова: {e}")
-
 
 @dp.message_handler(state="*")
 async def save_homework(message: types.Message, state: FSMContext):
