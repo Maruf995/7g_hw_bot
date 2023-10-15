@@ -21,8 +21,10 @@ cursor = conn.cursor()
 
 cursor.execute('''CREATE TABLE IF NOT EXISTS homework
                   (id INTEGER PRIMARY KEY AUTOINCREMENT, subject TEXT, task TEXT)''')
-rows = cursor.fetchall()
 conn.commit()
+
+cursor.execute("SELECT subject, task FROM homework")
+rows = cursor.fetchall()
 
 subject_cb = CallbackData("subject", "subject_id")
 
@@ -75,26 +77,36 @@ async def list_homework_command(message: types.Message):
         cursor.execute('SELECT subject, task FROM homework')
         rows = cursor.fetchall()
 
-        # Создаем изображение
-        image = Image.new('RGB', (400, 200), color='white')
-        d = ImageDraw.Draw(image)
-        font = ImageFont.load_default()
+        # Открываем фоновое изображение
+        background_image = Image.open("back.jpg")
+        draw = ImageDraw.Draw(background_image)
+        font_path = "font.ttf"
+        font_size = 20
+        font = ImageFont.truetype(font_path, font_size)
+        text_color = "black"
+
+        # Получаем размеры изображения
+        image_width, image_height = background_image.size
 
         # Добавляем данные на изображение
-
-        y_offset = 10
+        y_offset = 102
         for row in rows:
             subject, task = row
             text = f'{subject}: {task}'
-            d.text((10, y_offset), text, fill='black', font=font)
-            y_offset += 20
 
-        # Сохраняем изображение в байтовом формате
+            # Получаем размеры текста
+            # Вычисляем координаты для центрирования текста
+            x = (image_width - image_height) // 3
+            y = y_offset
+
+            # Рисуем текст на изображении
+            draw.text((x, y), text, fill=text_color, font=font)
+            y_offset += font_size + 4.6  # Учитываем высоту текста и добавляем отступ
+
+        # Сохраняем изображение и отправляем его пользователю
         image_bytes = io.BytesIO()
-        image.save(image_bytes, format='PNG')
+        background_image.save(image_bytes, format='PNG')
         image_bytes.seek(0)
-
-        # Отправляем изображение пользователю
         await bot.send_photo(message.chat.id, photo=image_bytes)
 
     except Exception as e:
