@@ -2,19 +2,23 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram import types
 from PIL import Image, ImageDraw, ImageFont
-import io
-import textwrap
+from aiogram.utils import exceptions
+from aiogram.types import ParseMode
+from aiogram.dispatcher.filters.state import StatesGroup, State
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from aiogram.dispatcher import FSMContext
 from aiogram.utils.callback_data import CallbackData
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 import sqlite3
+import json
+import textwrap
 import logging
-
+import io
+import asyncio
 
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot('6569715162:AAELzdCadg1BCKpNxNYoplAYzYSKI4CsgFs')
+bot = Bot('6327379626:AAFjUhmkBHcTg9DhQu5sEm-s8a5ZZ-8mcNc')
 dp = Dispatcher(bot, storage=MemoryStorage())
 
 conn = sqlite3.connect('homework.db')
@@ -31,8 +35,19 @@ subject_cb = CallbackData("subject", "subject_id")
 delete_subject_cb = CallbackData("delete_subject", "subject_id")
 
 
-admin_user_ids = [1684336348, 2118892896, 5089971653]
+admin_user_ids = [1684336348, 2118892896, 5089971653, 5095793403, 6456247158]
 maruf_id = [1684336348]
+user_ids = []
+active_chats = {}
+
+
+
+try:
+    with open('users.json', 'r') as json_file:
+        user_ids = json.load(json_file)
+except FileNotFoundError:
+    user_ids = []
+# Загружаем список пользователей из файла, если файл существует
 
 subjects = {
     "Русский": "Русский",
@@ -41,6 +56,7 @@ subjects = {
     'Геометрия': 'Геометрия',
     'Физика': 'Физика',
     'География': 'География',
+    'Биология': 'Биология',
     "Английский (1)": "Английский (1 группа)",
     'Английский шк (1)': 'Английский ШК Компонент (1 группа)',
     'Английский (2)': 'Английский (2 группа)',
@@ -59,6 +75,15 @@ subjects = {
 list = InlineKeyboardButton(text="Список ДЗ", callback_data="hw")
 hw_btn = InlineKeyboardMarkup(row_width=1).add(list)
 
+class SendMessageState(StatesGroup):
+    InputMessage = State()
+
+class ReportState(StatesGroup):
+    WaitingForReport = State()
+
+# class AdminChatState(StatesGroup):
+#     WaitingForReply = State()
+
 def get_subjects_keyboard():
     keyboard = InlineKeyboardMarkup(row_width=2)
     for key, value in subjects.items():
@@ -75,17 +100,79 @@ def get_delete_subjects_keyboard():
 
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
+    user_id = message.from_user.id
+    if user_id not in user_ids:
+        user_ids.append(user_id)
+        with open('users.json', 'w') as json_file:
+            json.dump(user_ids, json_file)
     await message.answer(f'Привет, {message.from_user.full_name}! ')
     await message.answer('Этот бот был создан: @maruf_proger\n'
                          'Т.К. Вы ему все надоели, Он решил создать телеграм бота.\n'
                          'Через которого можно будет в любой момент узнать Д/З.\n'
                          'А так же, задать вопрос админам и оставить жалобу', reply_markup=hw_btn)
 
+@dp.message_handler(commands=['report'])
+async def start_report(message: types.Message):
+    await message.answer("Пожалуйста, опишите вашу жалобу. Ваше сообщение будет отправлено администраторам.")
+    await ReportState.WaitingForReport.set()
+
+# Обработчик для состояния ожидания жалобы
+@dp.message_handler(state=ReportState.WaitingForReport)
+async def receive_report(message: types.Message, state: FSMContext):
+    report_text = message.text
+
+    # Отправляем жалобу всем админам
+    for admin_id in maruf_id:
+        try:
+            await bot.send_message(admin_id, f"Пользователь: @{message.from_user.username} \nОправил жалобу: \n{report_text}")
+        except Exception as e:
+            print(f"Ошибка при отправке жалобы админам: {e}")
+
+    await state.finish()
+    await message.answer("Ваша жалоба успешно отправлена администраторам. Благодарим за ваше сообщение.")
+
+@dp.message_handler(commands=['all'])
+async def handle_send_message(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    if user_id in admin_user_ids:
+        keyboard = InlineKeyboardMarkup().add(InlineKeyboardButton('Отмена', callback_data='cancel'))
+        await message.answer("Введите текст сообщения для рассылки или нажмите кнопку 'Отмена'.",
+                             reply_markup=keyboard)
+        await SendMessageState.InputMessage.set()  # Переходим в состояние ожидания текста сообщения
+    else:
+        await message.answer("Вы не являетесь администратором. Извините, у вас нет доступа к этой команде.")
+
+@dp.callback_query_handler(lambda query: query.data == 'cancel', state=SendMessageState.InputMessage)
+async def cancel_sending(callback_query: types.CallbackQuery, state: FSMContext):
+    await state.finish()
+    await callback_query.message.answer("Рассылка отменена.")
+    # Если вы хотите удалить клавиатуру после нажатия на кнопку Отмена
+    await bot.edit_message_reply_markup(callback_query.message.chat.id, callback_query.message.message_id)  
+
+@dp.message_handler(state=SendMessageState.InputMessage)
+async def handle_message_input(message: types.Message, state: FSMContext):
+    if message.text == 'Отмена':
+        await state.finish()
+        await message.answer("Рассылка отменена.")
+    else:
+        with open('users.json', 'r') as json_file:
+            user_ids = json.load(json_file)
+        for user_id in user_ids:
+            try:
+                await bot.send_message(user_id, message.text, parse_mode=types.ParseMode.MARKDOWN)
+            except Exception as e:
+                print(f"Ошибка при отправке сообщения пользователю {user_id}: {e}")
+        await state.finish()
+        await message.answer("Рассылка завершена.")
+
+
 @dp.message_handler(commands=['top'])
 async def top(message: types.Message):
     await message.answer('СПИСОК ЛУЧШИХ:')
     await message.answer('АЗИЗА')
     await message.answer('МАРУФ')
+    await message.answer('Саян')
+    await message.answer('Вильдан')
     await message.answer('РАДМИР')
     await message.answer('БАЯН')
     await message.answer('ЧАСТИЧНО ЭЛЯ')
@@ -153,6 +240,62 @@ async def list_homework_command(callback_query: CallbackQuery):
             await bot.send_photo(callback_query.message.chat.id, photo=image_bytes)
 
         await bot.send_message(callback_query.message.chat.id, 'Получить список ДЗ еще раз', reply_markup=hw_btn)
+
+    except Exception as e:
+        logging.error(f"Ошибка при получении списка домашних заданий: {e}")
+
+@dp.message_handler(commands=['hw'])
+async def list_homework_command_by_command(message: types.Message):
+    try:
+        cursor.execute('SELECT subject, task FROM homework')
+        rows = cursor.fetchall()
+
+        # Открываем фоновое изображение
+        background_image = Image.open("back.jpg").convert('RGBA')
+        draw = ImageDraw.Draw(background_image)
+        font_path = "font.ttf"
+        font_size = 20
+        font = ImageFont.truetype(font_path, font_size)
+        text_color = "black"
+
+        # Получаем размеры изображения
+        image_width, image_height = background_image.size
+
+        # Максимальное количество строк текста на одной картинке
+        max_lines_per_image = 12
+
+        # Разбиваем текст на подстроки
+        text_lines = []
+        for row in rows:
+            subject, task = row
+            wrapped_text = textwrap.fill(f'{subject}: {task}', width=39)  # Максимальная длина строки 40 символов
+            text_lines.extend(wrapped_text.split('\n'))
+
+        # Разделяем текст на несколько изображений
+        for i in range(0, len(text_lines), max_lines_per_image):
+            start_index = i
+            end_index = i + max_lines_per_image
+            lines_to_display = text_lines[start_index:end_index]
+
+            # Создаем изображение с текстом
+            text_image = Image.new('RGBA', background_image.size, (255, 255, 255, 0))
+            text_draw = ImageDraw.Draw(text_image)
+            y_offset = 102
+            for line in lines_to_display:
+                text_width, text_height =  text_draw.textsize(line, font=font)
+                text_draw.text((50, y_offset), line, fill=text_color, font=font)
+                y_offset += text_height + 4  # Используем textsize для получения высоты текста и добавляем отступ
+
+            # Объединяем фоновое изображение и изображение с текстом
+            combined_image = Image.alpha_composite(background_image, text_image)
+
+            # Сохраняем изображение и отправляем его пользователю
+            image_bytes = io.BytesIO()
+            combined_image.save(image_bytes, format='PNG')
+            image_bytes.seek(0)
+            await bot.send_photo(message.chat.id, photo=image_bytes)
+
+        await bot.send_message(message.chat.id, 'Получить список ДЗ еще раз', reply_markup=hw_btn)
 
     except Exception as e:
         logging.error(f"Ошибка при получении списка домашних заданий: {e}")
