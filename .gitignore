@@ -1,1 +1,4 @@
-.homework.db
+homework.db
+users.json
+photos.db
+./venv

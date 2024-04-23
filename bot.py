@@ -24,9 +24,16 @@ dp = Dispatcher(bot, storage=MemoryStorage())
 conn = sqlite3.connect('homework.db')
 cursor = conn.cursor()
 
+photo_conn = sqlite3.connect('photos.db')
+photo_cursor = photo_conn.cursor()
+
 cursor.execute('''CREATE TABLE IF NOT EXISTS homework
                   (id INTEGER PRIMARY KEY AUTOINCREMENT, subject TEXT, task TEXT)''')
 conn.commit()
+
+photo_cursor.execute('''CREATE TABLE IF NOT EXISTS photos
+                  (id INTEGER PRIMARY KEY AUTOINCREMENT, subject TEXT, photo_path TEXT)''')
+photo_conn.commit()
 
 cursor.execute("SELECT subject, task FROM homework")
 rows = cursor.fetchall()
@@ -35,12 +42,12 @@ subject_cb = CallbackData("subject", "subject_id")
 delete_subject_cb = CallbackData("delete_subject", "subject_id")
 
 
+
 admin_user_ids = [1684336348, 2118892896, 5089971653, 5095793403, 6456247158]
 maruf_id = [1684336348]
+lo_id = [1684336348]
 user_ids = []
 active_chats = {}
-
-
 
 try:
     with open('users.json', 'r') as json_file:
@@ -110,6 +117,14 @@ async def start(message: types.Message):
                          'Т.К. Вы ему все надоели, Он решил создать телеграм бота.\n'
                          'Через которого можно будет в любой момент узнать Д/З.\n'
                          'А так же, задать вопрос админам и оставить жалобу', reply_markup=hw_btn)
+    
+@dp.message_handler(commands=['prunus'])
+async def start_report(message: types.Message):
+    await message.answer("ХАРА ТЕБЕ ВО ВСЕ ЩЕЛИ. Ты все так же надеешься?")
+
+@dp.message_handler(commands=['malus'])
+async def start_report(message: types.Message):
+    await message.answer("АХАХАХАХХАХАХАХ, НУ ТЫ ТУПОЙ КОНЕЧНО. РАЗ ПРУНУС НЕ РАБОТАЕТ, КАКОГО ФИГА МАЛУС БУДЕТ РАБОТАТЬ?")
 
 @dp.message_handler(commands=['report'])
 async def start_report(message: types.Message):
@@ -180,14 +195,16 @@ async def top(message: types.Message):
 
 @dp.message_handler(commands=['oma'])
 async def top(message: types.Message):
-    for i in range(10):
-        await message.answer('ОМА ЛОХ')
+    for i in range(35):
+        await message.answer('ОМА ПЛОХОЙ')
+
 
 @dp.message_handler(commands=['table'])
 async def top(message: types.Message):
     with open('table.png', 'rb') as table_photo:
         await bot.send_photo(message.chat.id, table_photo)
-
+    # with open('table1.png', 'rb') as table1_photo:
+    #     await bot.send_photo(message.chat.id, table1_photo)
 @dp.callback_query_handler(lambda query: query.data == "hw")
 async def list_homework_command(callback_query: CallbackQuery):
     try:
