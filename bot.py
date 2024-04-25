@@ -2,29 +2,28 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram import types
 from PIL import Image, ImageDraw, ImageFont
-from aiogram.utils import exceptions
-from aiogram.types import ParseMode
+from config import *
 from aiogram.dispatcher.filters.state import StatesGroup, State
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from aiogram.dispatcher import FSMContext
 from aiogram.utils.callback_data import CallbackData
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from gpt_handlers import *
 import sqlite3
 import json
 import textwrap
 import logging
 import io
-import asyncio
 
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot('6327379626:AAFjUhmkBHcTg9DhQu5sEm-s8a5ZZ-8mcNc')
+bot = Bot(TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
 
-conn = sqlite3.connect('homework.db')
+conn = sqlite3.connect('db/homework.db')
 cursor = conn.cursor()
 
-photo_conn = sqlite3.connect('photos.db')
+photo_conn = sqlite3.connect('db/photos.db')
 photo_cursor = photo_conn.cursor()
 
 cursor.execute('''CREATE TABLE IF NOT EXISTS homework
@@ -41,43 +40,17 @@ rows = cursor.fetchall()
 subject_cb = CallbackData("subject", "subject_id")
 delete_subject_cb = CallbackData("delete_subject", "subject_id")
 
+g4f_client = Client()
 
-
-admin_user_ids = [1684336348, 2118892896, 5089971653, 5095793403, 6456247158]
-maruf_id = [1684336348]
-lo_id = [1684336348]
-user_ids = []
-active_chats = {}
+# Переменная-флаг для отслеживания состояния работы бота
+active = False
 
 try:
-    with open('users.json', 'r') as json_file:
+    with open('db/users.json', 'r') as json_file:
         user_ids = json.load(json_file)
 except FileNotFoundError:
     user_ids = []
-# Загружаем список пользователей из файла, если файл существует
 
-subjects = {
-    "Русский": "Русский",
-    'Литература': 'Литература',
-    'Алгебра': 'Алгебра',
-    'Геометрия': 'Геометрия',
-    'Физика': 'Физика',
-    'География': 'География',
-    'Биология': 'Биология',
-    "Английский (1)": "Английский (1 группа)",
-    'Английский шк (1)': 'Английский ШК Компонент (1 группа)',
-    'Английский (2)': 'Английский (2 группа)',
-    'Английский шк (2)': 'Английский ШК Компонент (2 группа)',
-    'Кырг (1) ': 'Кырг (1 группа)',
-    'Кырг (2) ': 'Кырг (2 группа)',
-    'Адабиат': 'Адабиат',
-    'История': 'История',
-    'ЧиО': 'ЧиО',
-    'Музыка': 'Музыка',
-    'Информатика (1 группа)': 'Информатика (1 группа)',
-    'Информатика (2 группа)': 'Информатика (2 группа)',
-    'ИЗО': 'ИЗО'
-}
 
 list = InlineKeyboardButton(text="Список ДЗ", callback_data="hw")
 hw_btn = InlineKeyboardMarkup(row_width=1).add(list)
@@ -88,8 +61,6 @@ class SendMessageState(StatesGroup):
 class ReportState(StatesGroup):
     WaitingForReport = State()
 
-# class AdminChatState(StatesGroup):
-#     WaitingForReply = State()
 
 def get_subjects_keyboard():
     keyboard = InlineKeyboardMarkup(row_width=2)
@@ -110,22 +81,13 @@ async def start(message: types.Message):
     user_id = message.from_user.id
     if user_id not in user_ids:
         user_ids.append(user_id)
-        with open('users.json', 'w') as json_file:
+        with open('db/users.json', 'w') as json_file:
             json.dump(user_ids, json_file)
     await message.answer(f'Привет, {message.from_user.full_name}! ')
-    await message.answer('Этот бот был создан: @maruf_proger\n'
-                         'Т.К. Вы ему все надоели, Он решил создать телеграм бота.\n'
-                         'Через которого можно будет в любой момент узнать Д/З.\n'
-                         'А так же, задать вопрос админам и оставить жалобу', reply_markup=hw_btn)
+    await message.answer('Cозданo: @maruf_proger\n'
+                         '   \n'
+                         'Нажмите на кнопку, чтобы получить дз', reply_markup=hw_btn)
     
-@dp.message_handler(commands=['prunus'])
-async def start_report(message: types.Message):
-    await message.answer("ХАРА ТЕБЕ ВО ВСЕ ЩЕЛИ. Ты все так же надеешься?")
-
-@dp.message_handler(commands=['malus'])
-async def start_report(message: types.Message):
-    await message.answer("АХАХАХАХХАХАХАХ, НУ ТЫ ТУПОЙ КОНЕЧНО. РАЗ ПРУНУС НЕ РАБОТАЕТ, КАКОГО ФИГА МАЛУС БУДЕТ РАБОТАТЬ?")
-
 @dp.message_handler(commands=['report'])
 async def start_report(message: types.Message):
     await message.answer("Пожалуйста, опишите вашу жалобу. Ваше сообщение будет отправлено администраторам.")
@@ -170,7 +132,7 @@ async def handle_message_input(message: types.Message, state: FSMContext):
         await state.finish()
         await message.answer("Рассылка отменена.")
     else:
-        with open('users.json', 'r') as json_file:
+        with open('db/users.json', 'r') as json_file:
             user_ids = json.load(json_file)
         for user_id in user_ids:
             try:
@@ -180,31 +142,43 @@ async def handle_message_input(message: types.Message, state: FSMContext):
         await state.finish()
         await message.answer("Рассылка завершена.")
 
+@dp.message_handler(commands=['ai'])
+async def activate_bot(message: types.Message):
+    global active
+    active = True
+    await message.reply("ИИ активирован.\n"
+                        '\n'
+                        "Остановить ИИ: /st")
 
-@dp.message_handler(commands=['top'])
-async def top(message: types.Message):
-    await message.answer('СПИСОК ЛУЧШИХ:')
-    await message.answer('АЗИЗА')
-    await message.answer('МАРУФ')
-    await message.answer('Саян')
-    await message.answer('Вильдан')
-    await message.answer('РАДМИР')
-    await message.answer('БАЯН')
-    await message.answer('ЧАСТИЧНО ЭЛЯ')
-    await message.answer('А ОМА ТУПОЙ ИШАК')
-
-@dp.message_handler(commands=['oma'])
-async def top(message: types.Message):
-    for i in range(35):
-        await message.answer('ОМА ПЛОХОЙ')
+@dp.message_handler(commands=['st'])
+async def stop_bot(message: types.Message):
+    global active
+    active = False
+    await message.reply("ИИ деактивирован.")
 
 
-@dp.message_handler(commands=['table'])
-async def top(message: types.Message):
-    with open('table.png', 'rb') as table_photo:
-        await bot.send_photo(message.chat.id, table_photo)
-    # with open('table1.png', 'rb') as table1_photo:
-    #     await bot.send_photo(message.chat.id, table1_photo)
+# Обработчик для каждого нового сообщения
+@dp.message_handler()
+async def respond_with_gpt(message: types.Message):
+    global active
+    if active:
+        # Получение текста сообщения от пользователя
+        user_input = message.text
+        
+        # Создание запроса к модели GPT для генерации ответа
+        response = g4f_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": user_input}],
+            # Дополнительные параметры, если необходимо
+        )
+        
+        # Извлечение ответа из полученного ответа
+        gpt_response = response.choices[0].message.content
+        
+        # Отправка ответа пользователю
+        await message.reply(gpt_response)
+
+
 @dp.callback_query_handler(lambda query: query.data == "hw")
 async def list_homework_command(callback_query: CallbackQuery):
     try:
@@ -212,7 +186,7 @@ async def list_homework_command(callback_query: CallbackQuery):
         rows = cursor.fetchall()
 
         # Открываем фоновое изображение
-        background_image = Image.open("back.jpg").convert('RGBA')
+        background_image = Image.open('image/back.jpg').convert('RGBA')
         draw = ImageDraw.Draw(background_image)
         font_path = "font.ttf"
         font_size = 20
@@ -268,7 +242,7 @@ async def list_homework_command_by_command(message: types.Message):
         rows = cursor.fetchall()
 
         # Открываем фоновое изображение
-        background_image = Image.open("back.jpg").convert('RGBA')
+        background_image = Image.open("image/back.jpg").convert('RGBA')
         draw = ImageDraw.Draw(background_image)
         font_path = "font.ttf"
         font_size = 20
@@ -329,7 +303,7 @@ async def delete_homework_command(message: types.Message):
 @dp.message_handler(commands=['clear_database'])
 async def clear_database_command(message: types.Message):
     user_id = message.from_user.id
-    if user_id in maruf_id:
+    if user_id in admin_user_ids:
         try:
             cursor.execute('DELETE FROM homework')
             conn.commit()
@@ -404,6 +378,9 @@ async def save_homework(message: types.Message, state: FSMContext):
             await message.answer("Вы не являетесь администратором. Извините, у вас нет доступа к этой команде.")
     except Exception as e:
         logging.error(f"Ошибка при обновлении/сохранении домашнего задания: {e}")
+
+
+
 
 if __name__ == '__main__':
     from aiogram import executor
